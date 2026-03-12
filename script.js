@@ -63,6 +63,7 @@ const iconPickerCurrent = document.getElementById('iconPickerCurrent');
 const iconPickerCancelBtn = document.getElementById('iconPickerCancelBtn');
 const sidebarToggleBtn = document.getElementById('sidebarToggleBtn');
 const textColorPicker = document.getElementById('textColorPicker');
+const colorApplyBtn = document.getElementById('colorApplyBtn');
 const toolbarButtons = Array.from(document.querySelectorAll('.toolbar-btn'));
 
 function escapeHtml(text) {
@@ -423,8 +424,37 @@ function getCurrentEditorRange() {
   }
   return null;
 }
+function applyAlignmentToSelectedInlineMedia(cmd) {
+  if (!selectedInlineMedia || !contentTextInput.contains(selectedInlineMedia)) return false;
+
+  const media = selectedInlineMedia;
+  media.style.display = 'block';
+  media.style.marginTop = media.classList.contains('inline-pdf-wrap') ? '12px' : '0';
+  media.style.marginBottom = media.classList.contains('inline-pdf-wrap') ? '12px' : '0';
+
+  if (cmd === 'justifyLeft') {
+    media.style.marginLeft = '0';
+    media.style.marginRight = 'auto';
+  } else if (cmd === 'justifyCenter') {
+    media.style.marginLeft = 'auto';
+    media.style.marginRight = 'auto';
+  } else if (cmd === 'justifyRight') {
+    media.style.marginLeft = 'auto';
+    media.style.marginRight = '0';
+  } else {
+    return false;
+  }
+
+  saveEditorSelection();
+  return true;
+}
+
 function applyEditorCommand(cmd, value = null) {
   contentTextInput.focus({ preventScroll: true });
+
+  if (['justifyLeft', 'justifyCenter', 'justifyRight'].includes(cmd) && applyAlignmentToSelectedInlineMedia(cmd)) {
+    return;
+  }
 
   const range = getCurrentEditorRange();
   if (!range) return;
@@ -979,7 +1009,9 @@ document.addEventListener('selectionchange', () => {
   saveEditorSelection();
 });
 document.addEventListener('mousedown', event => {
-  if (!event.target.closest('.inline-media-wrap')) clearSelectedInlineMedia();
+  if (event.target.closest('.inline-media-wrap')) return;
+  if (event.target.closest('.editor-toolbar')) return;
+  clearSelectedInlineMedia();
 });
 contentTextInput.addEventListener('paste', handleEditorPaste);
 contentTextInput.addEventListener('drop', handleEditorDrop);
@@ -1000,6 +1032,7 @@ toolbarButtons.forEach(btn => {
   btn.addEventListener('mousedown', event => {
     saveEditorSelection();
     event.preventDefault();
+    event.stopPropagation();
   });
   btn.addEventListener('click', () => {
     applyEditorCommand(btn.getAttribute('data-cmd'));
@@ -1009,11 +1042,22 @@ toolbarButtons.forEach(btn => {
 textColorPicker.addEventListener('mousedown', event => {
   saveEditorSelection();
   event.preventDefault();
+  event.stopPropagation();
 });
 textColorPicker.addEventListener('input', () => {
-  applyEditorCommand('foreColor', textColorPicker.value);
   saveEditorSelection();
 });
+if (colorApplyBtn) {
+  colorApplyBtn.addEventListener('mousedown', event => {
+    saveEditorSelection();
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  colorApplyBtn.addEventListener('click', () => {
+    applyEditorCommand('foreColor', textColorPicker.value);
+    saveEditorSelection();
+  });
+}
 
 searchInput.addEventListener('input', renderMenus);
 if (attachmentInput) {
