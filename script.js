@@ -1,6 +1,7 @@
 
 const STORAGE_KEY = 'cert-study-site-data-v7';
-const GITHUB_SYNC_KEY = 'cert-study-github-sync-v1';
+const GITHUB_SYNC_KEY = 'cert-study-github-sync-v2';
+const REMOTE_SYNC_META_KEY = 'cert-study-last-sync-meta-v1';
 const REMOTE_DATA_PATH = 'site-data.json';
 
 const MENU_ICON_OPTIONS = ['📘','🖥️','🧪','✅','🗄️','📊','⌨️','🎨','🤖','🧠','📑','💻','📚','📝','📌','📈','🧾','🔖','📁','⭐'];
@@ -36,6 +37,11 @@ let appData = loadData();
 let githubSyncConfig = loadGithubSyncConfig();
 let isRemoteDataLoaded = false;
 let isAdminMode = false;
+let syncInProgress = false;
+let queuedSyncReason = '';
+let lastKnownRemoteSha = null;
+let lastLoadedRemoteText = '';
+let pendingSyncTimer = null;
 let pendingAttachments = [];
 let savedEditorRange = null;
 let selectedInlineMedia = null;
@@ -77,6 +83,7 @@ const githubAutoSyncCheckbox = document.getElementById('githubAutoSyncCheckbox')
 const githubSyncStatus = document.getElementById('githubSyncStatus');
 const saveGithubConfigBtn = document.getElementById('saveGithubConfigBtn');
 const syncNowBtn = document.getElementById('syncNowBtn');
+const saveContentBtn = document.getElementById('saveContentBtn');
 
 function escapeHtml(text) {
   return String(text)
@@ -179,6 +186,82 @@ function readGithubSyncForm() {
   updateGithubSyncStatus();
 }
 
+
+function loadRemoteSyncMeta() {
+  try {
+    const raw = localStorage.getItem(REMOTE_SYNC_META_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    return parsed;
+  } catch (_) {
+    return null;
+  }
+}
+
+function saveRemoteSyncMeta(meta) {
+  localStorage.setItem(REMOTE_SYNC_META_KEY, JSON.stringify(meta));
+}
+
+function currentDataJson() {
+  return JSON.stringify(appData, null, 2);
+}
+
+function setSyncUiBusy(busy) {
+  syncInProgress = busy;
+  [saveContentBtn, syncNowBtn, saveGithubConfigBtn].forEach(btn => {
+    if (btn) btn.disabled = busy;
+  });
+}
+
+function setQueuedSync(reason = 'auto') {
+  queuedSyncReason = reason;
+}
+
+function clearQueuedSync() {
+  queuedSyncReason = '';
+}
+
+function scheduleDeferredAutoSync(reason = 'auto') {
+  if (!githubSyncConfig.autoSync) return;
+  if (pendingSyncTimer) clearTimeout(pendingSyncTimer);
+  pendingSyncTimer = setTimeout(async () => {
+    pendingSyncTimer = null;
+    try {
+      await persistAppData(reason);
+    } catch (error) {
+      console.error(error);
+      updateGithubSyncStatus('자동 반영 실패');
+    }
+  }, 1200);
+}
+
+function normalizeGithubErrorMessage(error) {
+  const message = String(error?.message || error || '알 수 없는 오류');
+  if (message.includes('401')) return '401 인증 오류입니다. 토큰이 잘못됐거나 앞뒤 공백이 들어갔습니다.';
+  if (message.includes('403')) return '403 권한 오류입니다. 토큰에 Contents: Read and write 권한이 있는지 확인하세요.';
+  if (message.includes('409')) return '409 충돌 오류입니다. 최신 파일 기준으로 다시 시도해 주세요.';
+  if (message.includes('422')) return '422 요청 형식 오류입니다. Owner / Repository / Branch 값을 다시 확인하세요.';
+  return message;
+}
+
+function updateLastSyncMeta(commitSha = '', commitUrl = '', message = '') {
+  const meta = {
+    at: new Date().toISOString(),
+    commitSha,
+    commitUrl,
+    message
+  };
+  saveRemoteSyncMeta(meta);
+  return meta;
+}
+
+function showSyncResultAlert(prefix, resultMeta) {
+  const when = resultMeta?.at ? new Date(resultMeta.at).toLocaleString('ko-KR') : new Date().toLocaleString('ko-KR');
+  alert(`${prefix}
+마지막 반영 시각: ${when}`);
+}
+
 function getRemoteFetchUrl() {
   const path = `${REMOTE_DATA_PATH}?v=${Date.now()}`;
   if (window.location.protocol === 'file:') return path;
@@ -190,9 +273,11 @@ async function tryLoadRemoteData() {
   try {
     const response = await fetch(getRemoteFetchUrl(), { cache: 'no-store' });
     if (!response.ok) return false;
-    const remoteData = await response.json();
+    const remoteText = await response.text();
+    const remoteData = JSON.parse(remoteText);
     if (!remoteData?.menus?.length) return false;
     appData = normalizeLoadedData(remoteData);
+    lastLoadedRemoteText = JSON.stringify(appData, null, 2);
     saveData();
     isRemoteDataLoaded = true;
     return true;
@@ -202,20 +287,32 @@ async function tryLoadRemoteData() {
   }
 }
 
-async function getGithubFileSha(owner, repo, branch, path) {
+async function fetchGithubFileState(owner, repo, branch, path) {
   const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${encodeURIComponent(branch)}`, {
     headers: {
       Authorization: `Bearer ${githubSyncConfig.token}`,
       Accept: 'application/vnd.github+json'
     }
   });
-  if (response.status === 404) return null;
+  if (response.status === 404) return { sha: null, text: '', exists: false };
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(`기존 파일 조회 실패: ${response.status} ${errorText}`);
   }
   const json = await response.json();
-  return json.sha || null;
+  let decoded = '';
+  if (json.content) {
+    try {
+      decoded = decodeURIComponent(escape(atob(String(json.content).replace(/\n/g, ''))));
+    } catch (_) {
+      decoded = '';
+    }
+  }
+  return {
+    sha: json.sha || null,
+    text: decoded,
+    exists: true
+  };
 }
 
 function utf8ToBase64(text) {
@@ -227,43 +324,91 @@ function selectedMenuSafeName() {
   return selected?.name || '전체 메뉴';
 }
 
-async function pushSiteDataToGithub(reason = 'auto') {
+async function pushSiteDataToGithub(reason = 'auto', options = {}) {
   readGithubSyncForm();
   const { owner, repo, branch, token, autoSync } = githubSyncConfig;
   if (!owner || !repo || !branch || !token) {
     throw new Error('GitHub 연동 정보가 비어 있습니다. Owner / Repository / Branch / Token을 먼저 입력하세요.');
   }
-  if (!autoSync && reason !== 'manual') return false;
-
-  updateGithubSyncStatus('반영 중...');
-  const sha = await getGithubFileSha(owner, repo, branch, REMOTE_DATA_PATH);
-  const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${REMOTE_DATA_PATH}`, {
-    method: 'PUT',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/vnd.github+json',
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      message: `[site-sync] ${selectedMenuSafeName()} - ${new Date().toLocaleString('ko-KR')}`,
-      content: utf8ToBase64(JSON.stringify(appData, null, 2)),
-      branch,
-      ...(sha ? { sha } : {})
-    })
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`GitHub 반영 실패: ${response.status} ${errorText}`);
+  if (!autoSync && reason !== 'manual' && !options.force) return false;
+  if (syncInProgress && !options.fromQueue) {
+    setQueuedSync(reason);
+    updateGithubSyncStatus('이전 반영 완료 후 재시도 예정');
+    return 'queued';
   }
-  updateGithubSyncStatus('GitHub 반영 완료');
-  return true;
+
+  const desiredJson = currentDataJson();
+  setSyncUiBusy(true);
+  updateGithubSyncStatus('GitHub 반영 중...');
+
+  try {
+    let remoteState = await fetchGithubFileState(owner, repo, branch, REMOTE_DATA_PATH);
+    lastKnownRemoteSha = remoteState.sha;
+
+    if (remoteState.text && remoteState.text === desiredJson) {
+      const meta = updateLastSyncMeta('', '', '동일 내용');
+      updateGithubSyncStatus('이미 최신 내용입니다');
+      return { ok: true, skipped: true, meta };
+    }
+
+    const message = `[site-sync] ${selectedMenuSafeName()} - ${new Date().toLocaleString('ko-KR')}`;
+
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${REMOTE_DATA_PATH}`, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/vnd.github+json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          message,
+          content: utf8ToBase64(desiredJson),
+          branch,
+          ...(remoteState.sha ? { sha: remoteState.sha } : {})
+        })
+      });
+
+      if (response.ok) {
+        const json = await response.json();
+        const commitSha = json?.commit?.sha || '';
+        const commitUrl = json?.commit?.html_url || '';
+        lastKnownRemoteSha = json?.content?.sha || remoteState.sha || null;
+        lastLoadedRemoteText = desiredJson;
+        const meta = updateLastSyncMeta(commitSha, commitUrl, message);
+        updateGithubSyncStatus('GitHub 반영 완료');
+        return { ok: true, skipped: false, meta };
+      }
+
+      const errorText = await response.text();
+      if (response.status === 409 && attempt < 3) {
+        remoteState = await fetchGithubFileState(owner, repo, branch, REMOTE_DATA_PATH);
+        lastKnownRemoteSha = remoteState.sha;
+        continue;
+      }
+      throw new Error(`GitHub 반영 실패: ${response.status} ${errorText}`);
+    }
+
+    throw new Error('GitHub 반영 실패: 알 수 없는 충돌 상태입니다.');
+  } finally {
+    setSyncUiBusy(false);
+    if (queuedSyncReason) {
+      const nextReason = queuedSyncReason;
+      clearQueuedSync();
+      setTimeout(() => {
+        pushSiteDataToGithub(nextReason, { fromQueue: true }).catch(error => {
+          console.error(error);
+          updateGithubSyncStatus('대기 중 반영 실패');
+        });
+      }, 200);
+    }
+  }
 }
 
-async function persistAppData(reason = '저장') {
+async function persistAppData(reason = '저장', options = {}) {
   saveData();
-  if (!githubSyncConfig.autoSync) return false;
-  return pushSiteDataToGithub(reason);
+  if (!githubSyncConfig.autoSync && !options.force) return { ok: false, skipped: true, localOnly: true };
+  return pushSiteDataToGithub(reason, options);
 }
 
 function getYoutubeVideoId(url) {
@@ -1069,15 +1214,19 @@ async function saveCurrentContent() {
   selected.attachments = structuredClone(pendingAttachments);
 
   try {
-    await persistAppData('내용 저장');
+    const result = await persistAppData('내용 저장');
     renderAll();
-    alert(githubSyncConfig.autoSync ? '저장 및 GitHub 반영이 완료되었습니다.' : '로컬 저장이 완료되었습니다. GitHub까지 자동 반영하려면 아래 연동 정보를 먼저 저장하세요.');
+    if (githubSyncConfig.autoSync) {
+      showSyncResultAlert('저장 및 GitHub 반영이 완료되었습니다.', result?.meta);
+    } else {
+      alert('로컬 저장이 완료되었습니다. GitHub까지 자동 반영하려면 아래 연동 정보를 먼저 저장하세요.');
+    }
   } catch (error) {
     console.error(error);
     saveData();
     renderAll();
     alert(`로컬 저장은 완료됐지만 GitHub 반영은 실패했습니다.
-${error.message}`);
+${normalizeGithubErrorMessage(error)}`);
   }
 }
 async function clearCurrentContent() {
@@ -1096,7 +1245,7 @@ async function clearCurrentContent() {
     console.error(error);
     saveData();
     alert(`로컬 저장은 완료됐지만 GitHub 반영은 실패했습니다.
-${error.message}`);
+${normalizeGithubErrorMessage(error)}`);
   }
   renderAll();
 }
@@ -1199,6 +1348,7 @@ applyTextColorBtn?.addEventListener('click', () => {
 searchInput.addEventListener('input', renderMenus);
 saveGithubConfigBtn?.addEventListener('click', () => {
   readGithubSyncForm();
+  updateGithubSyncStatus(githubSyncConfig.autoSync ? '자동 반영 준비 완료' : '연동 정보 저장됨');
   alert('GitHub 연동 정보가 저장되었습니다.');
 });
 githubAutoSyncCheckbox?.addEventListener('change', () => {
@@ -1206,8 +1356,8 @@ githubAutoSyncCheckbox?.addEventListener('change', () => {
 });
 syncNowBtn?.addEventListener('click', async () => {
   try {
-    await pushSiteDataToGithub('manual');
-    alert('현재 내용이 GitHub에 반영되었습니다. Pages 반영까지는 수 초~수 분 걸릴 수 있습니다.');
+    const result = await pushSiteDataToGithub('manual', { force: true });
+    showSyncResultAlert('현재 내용이 GitHub에 반영되었습니다. Pages 반영까지는 수 초~수 분 걸릴 수 있습니다.', result?.meta);
   } catch (error) {
     console.error(error);
     alert(`GitHub 반영 실패\n${error.message}`);
@@ -1220,6 +1370,10 @@ if (attachmentInput) {
 }
 
 fillGithubSyncForm();
+const lastSyncMeta = loadRemoteSyncMeta();
+if (lastSyncMeta?.at && githubSyncConfig.owner && githubSyncConfig.repo) {
+  updateGithubSyncStatus(`마지막 반영 ${new Date(lastSyncMeta.at).toLocaleString('ko-KR')}`);
+}
 
 (async function initApp() {
   await tryLoadRemoteData();
