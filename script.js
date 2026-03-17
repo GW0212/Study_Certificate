@@ -176,9 +176,9 @@ function updateGithubSyncStatus(message = '') {
 
 function readGithubSyncForm() {
   githubSyncConfig = {
-    owner: githubOwnerInput.value.trim(),
-    repo: githubRepoInput.value.trim(),
-    branch: githubBranchInput.value.trim() || 'main',
+    owner: sanitizeGithubValue(githubOwnerInput.value),
+    repo: sanitizeGithubValue(githubRepoInput.value),
+    branch: sanitizeGithubValue(githubBranchInput.value) || 'main',
     token: githubTokenInput.value.trim(),
     autoSync: githubAutoSyncCheckbox.checked
   };
@@ -243,7 +243,7 @@ function normalizeGithubErrorMessage(error) {
   if (message.includes('404')) return '404 오류입니다. Repository 이름, Branch 이름, site-data.json 파일 존재 여부를 확인하세요.';
   if (message.includes('409')) return '409 충돌 오류입니다. 최신 파일 기준으로 다시 시도해 주세요.';
   if (message.includes('422')) return '422 요청 형식 오류입니다. Owner / Repository / Branch 값을 다시 확인하세요.';
-  if (message.toLowerCase().includes('failed to fetch')) return '네트워크 요청 실패입니다. GitHub Pages 주소에서 실행 중인지, Repository 값이 실제 저장소명과 같은지, 브라우저 확장프로그램이 요청을 막지 않는지 확인하세요.';
+  if (message.toLowerCase().includes('failed to fetch')) return '네트워크 요청 실패입니다. GitHub Pages 주소에서 실행 중인지, Owner/Repository/Branch 값이 실제 저장소와 같은지, 토큰 앞뒤 공백이 없는지, 브라우저 확장프로그램이 요청을 막지 않는지 확인하세요.';
   return message;
 }
 
@@ -302,11 +302,89 @@ function applyInferredGithubConfig() {
   if (changed) saveGithubSyncConfig();
 }
 
+async function xhrRequest(url, options = {}, timeoutMs = 20000) {
+  return await new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(options.method || 'GET', url, true);
+    xhr.timeout = timeoutMs;
+
+    const headers = options.headers || {};
+    Object.entries(headers).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) xhr.setRequestHeader(key, value);
+    });
+
+    xhr.onload = () => {
+      const headerLines = xhr.getAllResponseHeaders().trim().split(/?
+/).filter(Boolean);
+      const headerMap = new Map();
+      headerLines.forEach(line => {
+        const index = line.indexOf(':');
+        if (index > -1) headerMap.set(line.slice(0, index).trim().toLowerCase(), line.slice(index + 1).trim());
+      });
+      const response = {
+        ok: xhr.status >= 200 && xhr.status < 300,
+        status: xhr.status,
+        statusText: xhr.statusText,
+        url,
+        headers: {
+          get(name) {
+            return headerMap.get(String(name).toLowerCase()) || null;
+          }
+        },
+        text: async () => xhr.responseText,
+        json: async () => {
+          try {
+            return JSON.parse(xhr.responseText || 'null');
+          } catch (error) {
+            throw new Error(`JSON 파싱 실패: ${error.message}`);
+          }
+        }
+      };
+      resolve(response);
+    };
+
+    xhr.onerror = () => reject(new Error('Failed to fetch'));
+    xhr.ontimeout = () => reject(new Error('요청 시간이 초과되었습니다. 네트워크 상태를 확인하세요.'));
+
+    if (options.body !== undefined) {
+      xhr.send(options.body);
+    } else {
+      xhr.send();
+    }
+  });
+}
+
+async function requestWithFallback(url, options = {}, timeoutMs = 20000) {
+  const fetchOptions = {
+    cache: 'no-store',
+    credentials: 'omit',
+    mode: 'cors',
+    redirect: 'follow',
+    ...options
+  };
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, { ...fetchOptions, signal: controller.signal });
+      return response;
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch (error) {
+    const message = String(error?.message || error || '');
+    if (message.toLowerCase().includes('failed to fetch') || message.toLowerCase().includes('networkerror') || message.toLowerCase().includes('aborted')) {
+      return await xhrRequest(url, fetchOptions, timeoutMs);
+    }
+    throw error;
+  }
+}
+
 async function fetchWithRetry(url, options = {}, retries = 2, delay = 500) {
   let lastError = null;
   for (let attempt = 0; attempt <= retries; attempt += 1) {
     try {
-      return await fetch(url, options);
+      return await requestWithFallback(url, options);
     } catch (error) {
       lastError = error;
       if (attempt >= retries) break;
@@ -335,8 +413,21 @@ async function tryLoadRemoteData() {
   }
 }
 
+
+function sanitizeGithubValue(value) {
+  return String(value || '').trim().replace(/^\/+|\/+$/g, '');
+}
+
+function buildGithubContentsApiUrl(owner, repo, path, branch = '') {
+  const safeOwner = encodeURIComponent(sanitizeGithubValue(owner));
+  const safeRepo = encodeURIComponent(sanitizeGithubValue(repo));
+  const safePath = String(path || '').split('/').map(part => encodeURIComponent(part)).join('/');
+  const base = `https://api.github.com/repos/${safeOwner}/${safeRepo}/contents/${safePath}`;
+  return branch ? `${base}?ref=${encodeURIComponent(sanitizeGithubValue(branch))}` : base;
+}
+
 async function fetchGithubFileState(owner, repo, branch, path) {
-  const response = await fetchWithRetry(`https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${encodeURIComponent(branch)}`, {
+  const response = await fetchWithRetry(buildGithubContentsApiUrl(owner, repo, path, branch), {
     headers: {
       Authorization: `Bearer ${githubSyncConfig.token}`,
       Accept: 'application/vnd.github+json'
@@ -405,7 +496,7 @@ async function pushSiteDataToGithub(reason = 'auto', options = {}) {
         return { ok: true, skipped: true, meta };
       }
 
-      const response = await fetchWithRetry(`https://api.github.com/repos/${owner}/${repo}/contents/${REMOTE_DATA_PATH}`, {
+      const response = await fetchWithRetry(buildGithubContentsApiUrl(owner, repo, REMOTE_DATA_PATH), {
         method: 'PUT',
         headers: {
           Authorization: `Bearer ${token}`,
