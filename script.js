@@ -429,7 +429,8 @@ async function fetchGithubFileState(owner, repo, branch, path) {
   const response = await fetchWithRetry(buildGithubContentsApiUrl(owner, repo, path, branch), {
     headers: {
       Authorization: `Bearer ${githubSyncConfig.token}`,
-      Accept: 'application/vnd.github+json'
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28'
     }
   });
   if (response.status === 404) return { sha: null, text: '', exists: false };
@@ -500,6 +501,7 @@ async function pushSiteDataToGithub(reason = 'auto', options = {}) {
         headers: {
           Authorization: `Bearer ${token}`,
           Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
           'Content-Type': 'application/json',
           'Cache-Control': 'no-cache'
         },
