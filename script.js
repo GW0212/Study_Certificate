@@ -314,8 +314,7 @@ async function xhrRequest(url, options = {}, timeoutMs = 20000) {
     });
 
     xhr.onload = () => {
-      const headerLines = xhr.getAllResponseHeaders().trim().split(/?
-/).filter(Boolean);
+      const headerLines = xhr.getAllResponseHeaders().trim().split(/\r?\n/).filter(Boolean);
       const headerMap = new Map();
       headerLines.forEach(line => {
         const index = line.indexOf(':');
