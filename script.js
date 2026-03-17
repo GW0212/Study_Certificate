@@ -338,32 +338,36 @@ async function pushSiteDataToGithub(reason = 'auto', options = {}) {
   }
 
   const desiredJson = currentDataJson();
+  const desiredBase64 = utf8ToBase64(desiredJson);
   setSyncUiBusy(true);
   updateGithubSyncStatus('GitHub 반영 중...');
 
   try {
-    let remoteState = await fetchGithubFileState(owner, repo, branch, REMOTE_DATA_PATH);
-    lastKnownRemoteSha = remoteState.sha;
-
-    if (remoteState.text && remoteState.text === desiredJson) {
-      const meta = updateLastSyncMeta('', '', '동일 내용');
-      updateGithubSyncStatus('이미 최신 내용입니다');
-      return { ok: true, skipped: true, meta };
-    }
-
     const message = `[site-sync] ${selectedMenuSafeName()} - ${new Date().toLocaleString('ko-KR')}`;
+    const maxAttempts = 8;
 
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const remoteState = await fetchGithubFileState(owner, repo, branch, REMOTE_DATA_PATH);
+      lastKnownRemoteSha = remoteState.sha;
+
+      if (remoteState.text === desiredJson) {
+        lastLoadedRemoteText = desiredJson;
+        const meta = updateLastSyncMeta('', '', '동일 내용');
+        updateGithubSyncStatus('이미 최신 내용입니다');
+        return { ok: true, skipped: true, meta };
+      }
+
       const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${REMOTE_DATA_PATH}`, {
         method: 'PUT',
         headers: {
           Authorization: `Bearer ${token}`,
           Accept: 'application/vnd.github+json',
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache'
         },
         body: JSON.stringify({
           message,
-          content: utf8ToBase64(desiredJson),
+          content: desiredBase64,
           branch,
           ...(remoteState.sha ? { sha: remoteState.sha } : {})
         })
@@ -381,15 +385,28 @@ async function pushSiteDataToGithub(reason = 'auto', options = {}) {
       }
 
       const errorText = await response.text();
-      if (response.status === 409 && attempt < 3) {
-        remoteState = await fetchGithubFileState(owner, repo, branch, REMOTE_DATA_PATH);
-        lastKnownRemoteSha = remoteState.sha;
-        continue;
+
+      if (response.status === 409) {
+        if (attempt < maxAttempts) {
+          updateGithubSyncStatus(`충돌 재시도 중... (${attempt}/${maxAttempts})`);
+          await wait(250 * attempt);
+          continue;
+        }
+
+        const finalRemoteState = await fetchGithubFileState(owner, repo, branch, REMOTE_DATA_PATH);
+        if (finalRemoteState.text === desiredJson) {
+          lastKnownRemoteSha = finalRemoteState.sha;
+          lastLoadedRemoteText = desiredJson;
+          const meta = updateLastSyncMeta('', '', '동일 내용');
+          updateGithubSyncStatus('이미 최신 내용입니다');
+          return { ok: true, skipped: true, meta };
+        }
       }
+
       throw new Error(`GitHub 반영 실패: ${response.status} ${errorText}`);
     }
 
-    throw new Error('GitHub 반영 실패: 알 수 없는 충돌 상태입니다.');
+    throw new Error('GitHub 반영 실패: 재시도 횟수를 초과했습니다. 잠시 후 다시 시도해 주세요.');
   } finally {
     setSyncUiBusy(false);
     if (queuedSyncReason) {
