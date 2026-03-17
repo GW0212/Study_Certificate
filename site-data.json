@@ -3,103 +3,103 @@
   "sidebarCollapsed": false,
   "menus": [
     {
+      "emoji": "🖥️",
+      "attachments": [],
       "id": "menu-1",
       "name": "MOS",
-      "emoji": "🖥️",
       "contentTitle": "MOS 공부 메모",
       "contentText": "",
-      "contentHtml": "",
-      "attachments": []
+      "contentHtml": ""
     },
     {
+      "emoji": "🧪",
+      "attachments": [],
       "id": "menu-2",
       "name": "CSTS",
-      "emoji": "🧪",
       "contentTitle": "CSTS 공부 메모",
       "contentText": "여기에 시험 범위, 오답 정리, 핵심 개념을 정리하세요.\n\n예)\n- 테스트 전략\n- 테스트 프로세스\n- 명세 기반 테스트",
-      "contentHtml": "여기에 시험 범위, 오답 정리, 핵심 개념을 정리하세요.<br><br>예)<br>- 테스트 전략<br>- 테스트 프로세스<br>- 명세 기반 테스트",
-      "attachments": []
+      "contentHtml": "여기에 시험 범위, 오답 정리, 핵심 개념을 정리하세요.<br><br>예)<br>- 테스트 전략<br>- 테스트 프로세스<br>- 명세 기반 테스트"
     },
     {
+      "emoji": "✅",
+      "attachments": [],
       "id": "menu-3",
       "name": "ISTQB",
-      "emoji": "✅",
       "contentTitle": "ISTQB 공부 메모",
       "contentText": "",
-      "contentHtml": "",
-      "attachments": []
+      "contentHtml": ""
     },
     {
+      "emoji": "🗄️",
+      "attachments": [],
       "id": "menu-4",
       "name": "SQLD",
-      "emoji": "🗄️",
       "contentTitle": "SQLD 공부 메모",
       "contentText": "",
-      "contentHtml": "",
-      "attachments": []
+      "contentHtml": ""
     },
     {
+      "emoji": "📊",
+      "attachments": [],
       "id": "menu-5",
       "name": "ADSP",
-      "emoji": "📊",
       "contentTitle": "ADSP 공부 메모",
       "contentText": "",
-      "contentHtml": "",
-      "attachments": []
+      "contentHtml": ""
     },
     {
+      "emoji": "⌨️",
+      "attachments": [],
       "id": "menu-6",
       "name": "ITQ",
-      "emoji": "⌨️",
       "contentTitle": "ITQ 공부 메모",
       "contentText": "",
-      "contentHtml": "",
-      "attachments": []
+      "contentHtml": ""
     },
     {
+      "emoji": "🎨",
+      "attachments": [],
       "id": "menu-7",
       "name": "GTQ",
-      "emoji": "🎨",
       "contentTitle": "GTQ 공부 메모",
       "contentText": "",
-      "contentHtml": "",
-      "attachments": []
+      "contentHtml": ""
     },
     {
+      "emoji": "🤖",
+      "attachments": [],
       "id": "menu-8",
       "name": "GTQ-AI",
-      "emoji": "🤖",
       "contentTitle": "GTQ-AI 공부 메모",
       "contentText": "",
-      "contentHtml": "",
-      "attachments": []
+      "contentHtml": ""
     },
     {
+      "emoji": "🧠",
+      "attachments": [],
       "id": "menu-9",
       "name": "AI-POT",
-      "emoji": "🧠",
       "contentTitle": "AI-POT 공부 메모",
       "contentText": "",
-      "contentHtml": "",
-      "attachments": []
+      "contentHtml": ""
     },
     {
+      "emoji": "📑",
+      "attachments": [],
       "id": "menu-10",
       "name": "컴활 1급",
-      "emoji": "📑",
       "contentTitle": "컴활 1급 공부 메모",
       "contentText": "",
-      "contentHtml": "",
-      "attachments": []
+      "contentHtml": ""
     },
     {
+      "emoji": "💻",
+      "attachments": [],
       "id": "menu-11",
       "name": "정보처리기사",
-      "emoji": "💻",
       "contentTitle": "정보처리기사 공부 메모",
       "contentText": "",
-      "contentHtml": "",
-      "attachments": []
+      "contentHtml": ""
     }
   ]
 }
