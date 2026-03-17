@@ -1371,3 +1371,70 @@ body.inline-media-pointer-dragging *{
 .admin-mode-on .rich-editor .inline-media-wrap {
   pointer-events: auto;
 }
+
+
+.github-sync-card {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(248, 250, 255, 0.9);
+}
+.github-sync-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.github-sync-status {
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  background: rgba(148, 163, 184, 0.16);
+  color: var(--text-soft);
+}
+.github-sync-status.ok {
+  background: rgba(34, 197, 94, 0.12);
+  color: #15803d;
+}
+.github-sync-status.warn {
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
+}
+.github-sync-desc, .github-sync-help {
+  margin: 0 0 12px;
+  color: var(--text-soft);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+.github-sync-grid {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 10px 12px;
+  align-items: center;
+}
+.sync-label {
+  margin: 0;
+}
+.sync-check-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0;
+}
+.github-sync-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.sync-now-btn {
+  width: auto;
+  padding-inline: 18px;
+}
+@media (max-width: 760px) {
+  .github-sync-grid {
+    grid-template-columns: 1fr;
+  }
+}

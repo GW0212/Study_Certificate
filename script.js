@@ -1,5 +1,7 @@
 
-const STORAGE_KEY = 'cert-study-site-data-v6';
+const STORAGE_KEY = 'cert-study-site-data-v7';
+const GITHUB_SYNC_KEY = 'cert-study-github-sync-v1';
+const REMOTE_DATA_PATH = 'site-data.json';
 
 const MENU_ICON_OPTIONS = ['📘','🖥️','🧪','✅','🗄️','📊','⌨️','🎨','🤖','🧠','📑','💻','📚','📝','📌','📈','🧾','🔖','📁','⭐'];
 const presetMenus = [
@@ -31,6 +33,8 @@ const defaultData = {
 };
 
 let appData = loadData();
+let githubSyncConfig = loadGithubSyncConfig();
+let isRemoteDataLoaded = false;
 let isAdminMode = false;
 let pendingAttachments = [];
 let savedEditorRange = null;
@@ -63,8 +67,16 @@ const iconPickerCurrent = document.getElementById('iconPickerCurrent');
 const iconPickerCancelBtn = document.getElementById('iconPickerCancelBtn');
 const sidebarToggleBtn = document.getElementById('sidebarToggleBtn');
 const textColorPicker = document.getElementById('textColorPicker');
-const colorApplyBtn = document.getElementById('colorApplyBtn');
 const toolbarButtons = Array.from(document.querySelectorAll('.toolbar-btn'));
+const applyTextColorBtn = document.getElementById('applyTextColorBtn');
+const githubOwnerInput = document.getElementById('githubOwnerInput');
+const githubRepoInput = document.getElementById('githubRepoInput');
+const githubBranchInput = document.getElementById('githubBranchInput');
+const githubTokenInput = document.getElementById('githubTokenInput');
+const githubAutoSyncCheckbox = document.getElementById('githubAutoSyncCheckbox');
+const githubSyncStatus = document.getElementById('githubSyncStatus');
+const saveGithubConfigBtn = document.getElementById('saveGithubConfigBtn');
+const syncNowBtn = document.getElementById('syncNowBtn');
 
 function escapeHtml(text) {
   return String(text)
@@ -79,22 +91,25 @@ function convertPlainTextToHtml(text) {
   return escapeHtml(text || '').replace(/\n/g, '<br>');
 }
 
+function normalizeLoadedData(parsed) {
+  if (!parsed?.menus?.length) return structuredClone(defaultData);
+  parsed.sidebarCollapsed = Boolean(parsed.sidebarCollapsed);
+  parsed.menus = parsed.menus.map(menu => ({
+    emoji: '📘',
+    attachments: [],
+    ...menu,
+    attachments: Array.isArray(menu.attachments) ? menu.attachments : [],
+    contentHtml: menu.contentHtml || convertPlainTextToHtml(menu.contentText || '')
+  }));
+  return parsed;
+}
+
 function loadData() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return structuredClone(defaultData);
     const parsed = JSON.parse(raw);
-    if (!parsed.menus?.length) return structuredClone(defaultData);
-
-    parsed.sidebarCollapsed = Boolean(parsed.sidebarCollapsed);
-    parsed.menus = parsed.menus.map(menu => ({
-      emoji: '📘',
-      attachments: [],
-      ...menu,
-      attachments: Array.isArray(menu.attachments) ? menu.attachments : [],
-      contentHtml: menu.contentHtml || convertPlainTextToHtml(menu.contentText || '')
-    }));
-    return parsed;
+    return normalizeLoadedData(parsed);
   } catch (error) {
     console.error('데이터 로드 실패:', error);
     return structuredClone(defaultData);
@@ -107,6 +122,148 @@ function saveData() {
 
 function getSelectedMenu() {
   return appData.menus.find(menu => menu.id === appData.selectedMenuId) || appData.menus[0] || null;
+}
+
+function loadGithubSyncConfig() {
+  try {
+    const raw = localStorage.getItem(GITHUB_SYNC_KEY);
+    if (!raw) return { owner: '', repo: '', branch: 'main', token: '', autoSync: false };
+    const parsed = JSON.parse(raw);
+    return {
+      owner: String(parsed.owner || '').trim(),
+      repo: String(parsed.repo || '').trim(),
+      branch: String(parsed.branch || 'main').trim() || 'main',
+      token: String(parsed.token || '').trim(),
+      autoSync: Boolean(parsed.autoSync)
+    };
+  } catch (error) {
+    console.error('GitHub 설정 로드 실패:', error);
+    return { owner: '', repo: '', branch: 'main', token: '', autoSync: false };
+  }
+}
+
+function saveGithubSyncConfig() {
+  localStorage.setItem(GITHUB_SYNC_KEY, JSON.stringify(githubSyncConfig));
+}
+
+function fillGithubSyncForm() {
+  if (!githubOwnerInput) return;
+  githubOwnerInput.value = githubSyncConfig.owner || '';
+  githubRepoInput.value = githubSyncConfig.repo || '';
+  githubBranchInput.value = githubSyncConfig.branch || 'main';
+  githubTokenInput.value = githubSyncConfig.token || '';
+  githubAutoSyncCheckbox.checked = Boolean(githubSyncConfig.autoSync);
+  updateGithubSyncStatus();
+}
+
+function updateGithubSyncStatus(message = '') {
+  if (!githubSyncStatus) return;
+  let text = message || '미설정';
+  githubSyncStatus.classList.remove('ok', 'warn');
+  if (githubSyncConfig.owner && githubSyncConfig.repo && githubSyncConfig.branch && githubSyncConfig.token) {
+    text = message || (githubSyncConfig.autoSync ? '자동 반영 켜짐' : '연동 정보 저장됨');
+    githubSyncStatus.classList.add(githubSyncConfig.autoSync ? 'ok' : 'warn');
+  }
+  githubSyncStatus.textContent = text;
+}
+
+function readGithubSyncForm() {
+  githubSyncConfig = {
+    owner: githubOwnerInput.value.trim(),
+    repo: githubRepoInput.value.trim(),
+    branch: githubBranchInput.value.trim() || 'main',
+    token: githubTokenInput.value.trim(),
+    autoSync: githubAutoSyncCheckbox.checked
+  };
+  saveGithubSyncConfig();
+  updateGithubSyncStatus();
+}
+
+function getRemoteFetchUrl() {
+  const path = `${REMOTE_DATA_PATH}?v=${Date.now()}`;
+  if (window.location.protocol === 'file:') return path;
+  return new URL(path, window.location.href).toString();
+}
+
+async function tryLoadRemoteData() {
+  if (window.location.protocol === 'file:') return false;
+  try {
+    const response = await fetch(getRemoteFetchUrl(), { cache: 'no-store' });
+    if (!response.ok) return false;
+    const remoteData = await response.json();
+    if (!remoteData?.menus?.length) return false;
+    appData = normalizeLoadedData(remoteData);
+    saveData();
+    isRemoteDataLoaded = true;
+    return true;
+  } catch (error) {
+    console.warn('원격 site-data.json 로드 실패:', error);
+    return false;
+  }
+}
+
+async function getGithubFileSha(owner, repo, branch, path) {
+  const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${encodeURIComponent(branch)}`, {
+    headers: {
+      Authorization: `Bearer ${githubSyncConfig.token}`,
+      Accept: 'application/vnd.github+json'
+    }
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`기존 파일 조회 실패: ${response.status} ${errorText}`);
+  }
+  const json = await response.json();
+  return json.sha || null;
+}
+
+function utf8ToBase64(text) {
+  return btoa(unescape(encodeURIComponent(text)));
+}
+
+function selectedMenuSafeName() {
+  const selected = getSelectedMenu();
+  return selected?.name || '전체 메뉴';
+}
+
+async function pushSiteDataToGithub(reason = 'auto') {
+  readGithubSyncForm();
+  const { owner, repo, branch, token, autoSync } = githubSyncConfig;
+  if (!owner || !repo || !branch || !token) {
+    throw new Error('GitHub 연동 정보가 비어 있습니다. Owner / Repository / Branch / Token을 먼저 입력하세요.');
+  }
+  if (!autoSync && reason !== 'manual') return false;
+
+  updateGithubSyncStatus('반영 중...');
+  const sha = await getGithubFileSha(owner, repo, branch, REMOTE_DATA_PATH);
+  const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${REMOTE_DATA_PATH}`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github+json',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      message: `[site-sync] ${selectedMenuSafeName()} - ${new Date().toLocaleString('ko-KR')}`,
+      content: utf8ToBase64(JSON.stringify(appData, null, 2)),
+      branch,
+      ...(sha ? { sha } : {})
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`GitHub 반영 실패: ${response.status} ${errorText}`);
+  }
+  updateGithubSyncStatus('GitHub 반영 완료');
+  return true;
+}
+
+async function persistAppData(reason = '저장') {
+  saveData();
+  if (!githubSyncConfig.autoSync) return false;
+  return pushSiteDataToGithub(reason);
 }
 
 function getYoutubeVideoId(url) {
@@ -424,37 +581,8 @@ function getCurrentEditorRange() {
   }
   return null;
 }
-function applyAlignmentToSelectedInlineMedia(cmd) {
-  if (!selectedInlineMedia || !contentTextInput.contains(selectedInlineMedia)) return false;
-
-  const media = selectedInlineMedia;
-  media.style.display = 'block';
-  media.style.marginTop = media.classList.contains('inline-pdf-wrap') ? '12px' : '0';
-  media.style.marginBottom = media.classList.contains('inline-pdf-wrap') ? '12px' : '0';
-
-  if (cmd === 'justifyLeft') {
-    media.style.marginLeft = '0';
-    media.style.marginRight = 'auto';
-  } else if (cmd === 'justifyCenter') {
-    media.style.marginLeft = 'auto';
-    media.style.marginRight = 'auto';
-  } else if (cmd === 'justifyRight') {
-    media.style.marginLeft = 'auto';
-    media.style.marginRight = '0';
-  } else {
-    return false;
-  }
-
-  saveEditorSelection();
-  return true;
-}
-
 function applyEditorCommand(cmd, value = null) {
   contentTextInput.focus({ preventScroll: true });
-
-  if (['justifyLeft', 'justifyCenter', 'justifyRight'].includes(cmd) && applyAlignmentToSelectedInlineMedia(cmd)) {
-    return;
-  }
 
   const range = getCurrentEditorRange();
   if (!range) return;
@@ -931,19 +1059,28 @@ function applyMenuIcon(icon) {
   closeIconPicker();
   renderAll();
 }
-function saveCurrentContent() {
+async function saveCurrentContent() {
   const selected = getSelectedMenu();
   if (!selected) return;
 
   selected.contentTitle = contentTitleInput.value.trim();
   selected.contentHtml = getEditorHtml();
-  selected.contentText = contentTextInput.innerText.replace(/\u00A0/g, ' ').trim();
+  selected.contentText = contentTextInput.innerText.replace(/ /g, ' ').trim();
   selected.attachments = structuredClone(pendingAttachments);
-  saveData();
-  renderAll();
-  alert('저장되었습니다.');
+
+  try {
+    await persistAppData('내용 저장');
+    renderAll();
+    alert(githubSyncConfig.autoSync ? '저장 및 GitHub 반영이 완료되었습니다.' : '로컬 저장이 완료되었습니다. GitHub까지 자동 반영하려면 아래 연동 정보를 먼저 저장하세요.');
+  } catch (error) {
+    console.error(error);
+    saveData();
+    renderAll();
+    alert(`로컬 저장은 완료됐지만 GitHub 반영은 실패했습니다.
+${error.message}`);
+  }
 }
-function clearCurrentContent() {
+async function clearCurrentContent() {
   const selected = getSelectedMenu();
   if (!selected) return;
   const ok = confirm('현재 메뉴의 내용을 모두 삭제할까요?');
@@ -953,7 +1090,14 @@ function clearCurrentContent() {
   selected.contentHtml = '';
   selected.attachments = [];
   pendingAttachments = [];
-  saveData();
+  try {
+    await persistAppData('내용 삭제');
+  } catch (error) {
+    console.error(error);
+    saveData();
+    alert(`로컬 저장은 완료됐지만 GitHub 반영은 실패했습니다.
+${error.message}`);
+  }
   renderAll();
 }
 function renderAll() {
@@ -1009,9 +1153,7 @@ document.addEventListener('selectionchange', () => {
   saveEditorSelection();
 });
 document.addEventListener('mousedown', event => {
-  if (event.target.closest('.inline-media-wrap')) return;
-  if (event.target.closest('.editor-toolbar')) return;
-  clearSelectedInlineMedia();
+  if (!event.target.closest('.inline-media-wrap')) clearSelectedInlineMedia();
 });
 contentTextInput.addEventListener('paste', handleEditorPaste);
 contentTextInput.addEventListener('drop', handleEditorDrop);
@@ -1032,7 +1174,6 @@ toolbarButtons.forEach(btn => {
   btn.addEventListener('mousedown', event => {
     saveEditorSelection();
     event.preventDefault();
-    event.stopPropagation();
   });
   btn.addEventListener('click', () => {
     applyEditorCommand(btn.getAttribute('data-cmd'));
@@ -1042,28 +1183,45 @@ toolbarButtons.forEach(btn => {
 textColorPicker.addEventListener('mousedown', event => {
   saveEditorSelection();
   event.preventDefault();
-  event.stopPropagation();
 });
 textColorPicker.addEventListener('input', () => {
   saveEditorSelection();
 });
-if (colorApplyBtn) {
-  colorApplyBtn.addEventListener('mousedown', event => {
-    saveEditorSelection();
-    event.preventDefault();
-    event.stopPropagation();
-  });
-  colorApplyBtn.addEventListener('click', () => {
-    applyEditorCommand('foreColor', textColorPicker.value);
-    saveEditorSelection();
-  });
-}
+applyTextColorBtn?.addEventListener('mousedown', event => {
+  saveEditorSelection();
+  event.preventDefault();
+});
+applyTextColorBtn?.addEventListener('click', () => {
+  applyEditorCommand('foreColor', textColorPicker.value);
+  saveEditorSelection();
+});
 
 searchInput.addEventListener('input', renderMenus);
+saveGithubConfigBtn?.addEventListener('click', () => {
+  readGithubSyncForm();
+  alert('GitHub 연동 정보가 저장되었습니다.');
+});
+githubAutoSyncCheckbox?.addEventListener('change', () => {
+  readGithubSyncForm();
+});
+syncNowBtn?.addEventListener('click', async () => {
+  try {
+    await pushSiteDataToGithub('manual');
+    alert('현재 내용이 GitHub에 반영되었습니다. Pages 반영까지는 수 초~수 분 걸릴 수 있습니다.');
+  } catch (error) {
+    console.error(error);
+    alert(`GitHub 반영 실패\n${error.message}`);
+  }
+});
 if (attachmentInput) {
   attachmentInput.addEventListener('change', async event => {
     await handleAttachmentFiles(Array.from(event.target.files || []), { insertInline: true });
   });
 }
 
-renderAll();
+fillGithubSyncForm();
+
+(async function initApp() {
+  await tryLoadRemoteData();
+  renderAll();
+})();

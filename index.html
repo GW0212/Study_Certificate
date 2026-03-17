@@ -97,7 +97,7 @@
                 <span>색 지정</span>
                 <input id="textColorPicker" type="color" value="#24324a" />
               </label>
-              <button type="button" class="toolbar-btn" id="colorApplyBtn" title="지정한 색 적용">색 적용</button>
+              <button type="button" id="applyTextColorBtn" class="toolbar-btn" title="선택한 텍스트에 지정 색 적용">색 적용</button>
             </div>
             <div id="contentTextInput" class="text-area rich-editor" contenteditable="true" data-placeholder="공부 내용을 작성하세요.&#10;&#10;여기에 유튜브 링크를 붙여넣으면 자동 미리보기가 됩니다.&#10;PDF/이미지는 이 칸에 붙여넣기하거나 드래그하면 자동 첨부됩니다."></div>
     
@@ -110,6 +110,34 @@
             <input id="attachmentInput" class="file-input" type="file" accept=".pdf,image/*" multiple />
             <div id="attachmentListEditor" class="attachment-list editor-attachment-list"></div>
 
+
+
+            <div class="github-sync-card">
+              <div class="github-sync-head">
+                <strong>GitHub 자동 반영 설정</strong>
+                <span id="githubSyncStatus" class="github-sync-status">미설정</span>
+              </div>
+              <p class="github-sync-desc">관리자 저장 시 <code>site-data.json</code> 파일을 GitHub 저장소에 자동 커밋합니다. GitHub Pages는 이 파일을 읽어서 화면을 갱신합니다.</p>
+              <div class="github-sync-grid">
+                <label class="input-label sync-label" for="githubOwnerInput">Owner</label>
+                <input id="githubOwnerInput" class="text-input" type="text" placeholder="예: geunwoo" />
+
+                <label class="input-label sync-label" for="githubRepoInput">Repository</label>
+                <input id="githubRepoInput" class="text-input" type="text" placeholder="예: cert-study-site" />
+
+                <label class="input-label sync-label" for="githubBranchInput">Branch</label>
+                <input id="githubBranchInput" class="text-input" type="text" placeholder="예: main" value="main" />
+
+                <label class="input-label sync-label" for="githubTokenInput">GitHub Token</label>
+                <input id="githubTokenInput" class="text-input" type="password" placeholder="classic PAT 또는 fine-grained token" />
+              </div>
+              <label class="sync-check-row"><input id="githubAutoSyncCheckbox" type="checkbox" /> 저장 시 GitHub 자동 반영 사용</label>
+              <div class="github-sync-actions">
+                <button id="saveGithubConfigBtn" type="button" class="ghost-btn">연동 정보 저장</button>
+                <button id="syncNowBtn" type="button" class="primary-btn sync-now-btn">지금 GitHub에 반영</button>
+              </div>
+              <div class="github-sync-help">토큰에는 <strong>Contents: Read and write</strong> 권한이 필요합니다. 토큰은 브라우저 localStorage에 저장됩니다.</div>
+            </div>
             <div class="editor-actions">
               <button id="saveContentBtn" class="primary-btn">저장</button>
             </div>
